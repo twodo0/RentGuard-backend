@@ -1,0 +1,39 @@
+/target/
+/build/
+/out/
+/.gradle/
+*.iml
+.idea/
+/.vscode/
+.DS_Store
+.Rhistory
+/src/main/resources/application-*.yml
+/src/main/resources/application-*.properties
+.env
+.env.*
+logs/
+
+# --- secrets & local config ---
+/src/main/resources/application.yml
+/src/main/resources/application.properties
+/src/main/resources/*.local.*
+/src/main/resources/*-local.yml
+/src/main/resources/*-local.properties
+
+# Spring Boot default log file
+spring.log
+
+# Docker/Compose local envs
+*.env
+*.env.*
+docker-compose.override.yml
+
+# Certificates / keys (혹시 생길 경우 대비)
+*.pem
+*.crt
+*.key
+*.jks
+*.keystore
+
+# IDE/Tools (추가)
+.local.properties

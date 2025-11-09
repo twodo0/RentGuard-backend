@@ -33,10 +33,11 @@ public class PredictionController {
     @PostMapping("/by-image/{imageId}")
     public ResponseEntity<PredictionJobDto> createPredictionJob(
             @PathVariable Long imageId,
-            @RequestParam(required = false) Double threshold,
-            @RequestParam(required = false) String model
+            @RequestParam(defaultValue = "0.2") double yoloThreshold,
+            @RequestParam(defaultValue = "0.65") double vitThreshold,
+            @RequestParam(defaultValue = "YOLO - ViT") String model
     ) {
-        PredictionJobDto res = predictionJobService.submit(new PredictionJobCreateRequest(imageId, threshold, model));
+        PredictionJobDto res = predictionJobService.submit(new PredictionJobCreateRequest(imageId, yoloThreshold, vitThreshold, model));
 
         URI location = ServletUriComponentsBuilder.fromCurrentContextPath()
                 .path("/api/predictions/jobs/{jobId}")

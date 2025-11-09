@@ -6,6 +6,7 @@ public record PredictionRowView(
         Long predictionId,
         OffsetDateTime createdAt,
         String imageUrl,
+        String previewUrl,
         Long detectionCount
 ) {
 }

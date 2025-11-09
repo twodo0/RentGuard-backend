@@ -14,6 +14,7 @@ public class MinioProperties {
     private String endPoint; // http://localhost:9000
     private String rawBucket;
     private String heatmapBucket;
+    private String previewBucket;
 
     private int presignTtlSeconds = 3600; // minio.presign-expire-seconds (기본 3600)
 }

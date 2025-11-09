@@ -26,7 +26,7 @@ public class PredictionApp { // 실제로 사진을 저장하고, FastAPI를 호
     private final InferencePort fastApiAdapter;
     private final StorageKeyFactory keyFactory;
 
-    public Long runAndSave(Long imageId, Double threshold, String model){
+    public Long runAndSave(Long imageId, Double yoloThreshold, Double vitThreshold, String model){
         ImageMeta imageMeta = imageRepository.findById(imageId).orElseThrow();
         String rawUrl = presignUrlPort.presignGet(imageMeta.getBucket(), imageMeta.getKey());
 
@@ -40,14 +40,23 @@ public class PredictionApp { // 실제로 사진을 저장하고, FastAPI를 호
         String heatmapBucket = minioProperties.getHeatmapBucket();
         String heatmapKey = keyFactory.getHeatmapKey(p.getId());
 
+        String previewBucket = minioProperties.getPreviewBucket();
+        String previewKey = keyFactory.getPreviewKey(p.getId());
+
         // FastAPI 에서 직접 heatmap을 올려줘야 하기에 heatmapUrl (PUT 전용) 생성해서 던져줌
         String heatmapUploadUrl = presignUrlPort.presignPut(heatmapBucket, heatmapKey);
 
+        String previewUploadUrl = presignUrlPort.presignPut(previewBucket, previewKey);
+
         //추론 결과 + heatmapId 반환
-        FastApiPredictRes res = fastApiAdapter.predictByUrl(rawUrl, threshold, model, heatmapUploadUrl);
+        FastApiPredictRes res = fastApiAdapter.predictByUrl(rawUrl, yoloThreshold, vitThreshold, model, previewUploadUrl, heatmapUploadUrl);
 
         p.setHeatmapBucket(heatmapBucket);
         p.setHeatmapKey(heatmapKey);
+
+        p.setPreviewBucket(previewBucket);
+        p.setPreviewKey(previewKey);
+
         p.setDetections(FastApiMapper.toDetections(res.boxes()));
         // Prediction이 Cascade ALL이므로 flush 될 때 detection INSERT
 

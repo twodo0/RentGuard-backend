@@ -29,6 +29,14 @@ public class StorageKeyFactory {
         return key;
     }
 
+    @NotNull
+    public String getPreviewKey(Long predictionId){
+        String yyyy = DateTimeFormatter.ofPattern("yyyy").format(OffsetDateTime.now());
+        String mm = DateTimeFormatter.ofPattern("MM").format(OffsetDateTime.now());
+        String key = "preview/%s/%s/%d.png".formatted(yyyy, mm, predictionId);
+        return key;
+    }
+
     private String resolveExt(String originalFileName, String contentType) {
         String ext = extFromFilename(originalFileName);
         if (ext != null) return ext;

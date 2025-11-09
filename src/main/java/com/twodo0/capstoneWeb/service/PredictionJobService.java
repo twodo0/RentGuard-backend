@@ -32,12 +32,14 @@ public class PredictionJobService {
     // 던져주고 일단 바로 return
     @Transactional
     public PredictionJobDto submit(PredictionJobCreateRequest req){
-        double th = (req.threshold() != null) ? req.threshold() : probs.thresholdDefault();
+        double yoloThreshold = (req.yoloThreshold() != null) ? req.yoloThreshold() : probs.thresholdDefault();
+        double vitThreshold = (req.vitThreshold() != null) ? req.vitThreshold() : probs.thresholdDefault();
         String model = (req.model() != null) ? req.model() : probs.modelDefault();
 
         PredictionJob job = PredictionJob.builder()
                 .imageId(req.imageId())
-                .threshold(th)
+                .yoloThreshold(yoloThreshold)
+                .vitThreshold(vitThreshold)
                 .model(model)
                 .status(Status.QUEUED)
                 .createdAt(OffsetDateTime.now())

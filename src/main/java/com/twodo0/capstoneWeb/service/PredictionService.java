@@ -24,11 +24,13 @@ public class PredictionService {
     public Page<PredictionRowView> findRecent(Pageable pageable) {
         return predictionRepository.findRecentRows(pageable)
                 .map(p ->{
-                    var url = presignUrlPort.presignGet(p.imageBucket(), p.imageKey());
+                    var rawUrl = presignUrlPort.presignGet(p.imageBucket(), p.imageKey());
+                    var previewUrl = presignUrlPort.presignGet(p.previewBucket(), p.previewKey());
                     return new PredictionRowView(
                             p.predictionId(),
                             p.createdAt(),
-                            presignUrlPort.presignGet(p.imageBucket(), p.imageKey()),
+                            rawUrl,
+                            previewUrl,
                             p.detectionCount());
                 });
     }

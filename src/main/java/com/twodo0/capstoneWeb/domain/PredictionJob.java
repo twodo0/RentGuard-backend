@@ -22,7 +22,9 @@ public class PredictionJob {
     private Status status;
 
     private Long imageId;
-    private Double threshold;
+    private Double yoloThreshold;
+    private Double vitThreshold;
+
     private String model;
 
     private Long predictionId; // 완료 시 채움

@@ -23,15 +23,17 @@ public class FastApiAdapter implements InferencePort {
     private final AiProperties props;
 
     @Override
-    public FastApiPredictRes predictByUrl(String imageUrl, double threshold, String model) {
-        return predictByUrl(imageUrl, threshold, model, null);
+    public FastApiPredictRes predictByUrl(String imageUrl, double yoloThreshold, double vitThreshold, String model, String previewUploadUrl) {
+        return predictByUrl(imageUrl, yoloThreshold, vitThreshold, model, previewUploadUrl, null);
     }
 
     @Override
-    public FastApiPredictRes predictByUrl(String imageUrl, double threshold, String model, String heatmapUploadUrl) {
+    public FastApiPredictRes predictByUrl(String imageUrl, double yoloThreshold, double vitThreshold, String model, String previewUploadUrl, String heatmapUploadUrl) {
         var req = new HashMap<String, Object>();
         req.put("raw_url", imageUrl);
-        req.put("threshold", threshold);
+        req.put("preview_url", previewUploadUrl);
+        req.put("yoloThreshold", yoloThreshold);
+        req.put("vitThreshold", vitThreshold);
         req.put("model", model);
         if(heatmapUploadUrl != null) {
             req.put("heatmap_put_url", heatmapUploadUrl);

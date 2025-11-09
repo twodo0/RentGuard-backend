@@ -14,11 +14,11 @@ public interface PredictionRepository extends JpaRepository<Prediction, Long> {
     // DTO 프로젝션으로 한방에 쿼리를 날리기 떄문에 N+1 안 생김
     @Query(value = """
     select new com.twodo0.capstoneWeb.dto.PredictionRowDto(
-    p.id, p.createdAt, i.bucket, i.key, count(d.id)
+    p.id, p.createdAt, i.bucket, i.key, p.previewBucket, p.previewKey, count(d.id)
     )
     from Prediction p join p.image i
     left join p.detections d
-    group by p.id, p.createdAt, i.bucket, i.key
+    group by p.id, p.createdAt, i.bucket, i.key, p.previewKey, p.previewBucket
 """,
     countQuery = "select count(p) from Prediction p")
     Page<PredictionRowDto> findRecentRows(Pageable pageable);

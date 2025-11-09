@@ -19,7 +19,7 @@ public class RunAsyncService {
         tx.setRunning(jobId);
         try {
             PredictionJob job = predictionJobRepository.findById(jobId).orElseThrow();
-            Long predictionId = app.runAndSave(job.getImageId(), job.getThreshold(), job.getModel());
+            Long predictionId = app.runAndSave(job.getImageId(), job.getYoloThreshold(), job.getVitThreshold(), job.getModel());
             tx.markSucceeded(jobId, predictionId);
         } catch (Exception e) {
             tx.markFailed(jobId,e);

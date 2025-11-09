@@ -7,6 +7,8 @@ public record PredictionRowDto(
         OffsetDateTime createdAt,
         String imageBucket,
         String imageKey,
+        String previewBucket,
+        String previewKey,
         Long detectionCount
 ) {
 }

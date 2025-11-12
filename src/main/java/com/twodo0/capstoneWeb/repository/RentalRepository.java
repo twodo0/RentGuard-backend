@@ -9,4 +9,6 @@ import java.util.Optional;
 public interface RentalRepository extends JpaRepository<RentalSession, Long> {
     Optional<RentalSession> findByIdAndStatus(Long id, RentalStatus status);
 
+    boolean existsByVehicleNoAndStatus(String vehicleNo, RentalStatus status);
+
 }

@@ -57,9 +57,7 @@ public class RentalSession extends Auditable{
 
 
     public void finish(Prediction endPrediction, String endSummaryJson, String deltaJson) {
-        if(this.status != RentalStatus.IN_RENT){
-            throw new IllegalStateException("이미 반납된 차량입니다.");
-        }
+
         if(endPrediction == null){
             throw new IllegalArgumentException("endPrediction must not be null");
         }

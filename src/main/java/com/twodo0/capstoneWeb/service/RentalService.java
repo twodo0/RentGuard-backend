@@ -26,6 +26,12 @@ public class RentalService {
 
 
     public RentalStartRes startRental(RentalReq req) {
+
+        boolean alreadyInRent = rentalRepository.existsByVehicleNoAndStatus(req.vehicleNo(), RentalStatus.IN_RENT);
+        if (alreadyInRent) {
+            throw new IllegalArgumentException("이미 대여 중인 차량입니다.");
+        }
+
         Long predictionId = app.runAndSave(req.imageId(), req.yoloThreshold(),
                 req.vitThreshold(), req.model());
 
@@ -47,13 +53,17 @@ public class RentalService {
     }
 
     public RentalFinishRes finishRental(RentalFinishReq req) {
-        // 진행 중이던 세션 로드
-        RentalSession s  = rentalRepository.findByIdAndStatus(req.rentalId(), RentalStatus.IN_RENT).orElseThrow(
-                () -> new IllegalArgumentException("랜탈 정보를 찾을 수 없거나, 이미 반납되었습니다.")
+
+        RentalSession s = rentalRepository.findById(req.rentalId()).orElseThrow(
+                () -> new IllegalArgumentException("렌탈 정보를 찾을 수 없습니다.")
         );
 
-        if(req.vehicleNo() != null && !req.vehicleNo().equals(s.getVehicleNo())) {
-            throw new IllegalArgumentException("차량 번호 불일치");
+        if(!req.vehicleNo().equals(s.getVehicleNo())) {
+            throw new IllegalArgumentException("차량 번호가 일치하지 않습니다.");
+        }
+
+        if(s.getStatus() != RentalStatus.IN_RENT) {
+            throw new IllegalArgumentException("이미 반납된 차량입니다.");
         }
 
         // 예측 실행
@@ -79,6 +89,8 @@ public class RentalService {
         catch (Exception e) { throw new RuntimeException("JSON 직렬화 실패", e);}
     }
 
+    // JSON 문자열 s를 받아서, type으로 넘겨준 클래스 타입으로 파싱해서 객체로 돌려줌
+    // 제너릭 -> 원하는 타입만 명시해주면 JSON을 원하는 타입으로 바꿔줌
     private <T> T readJson(String s, Class<T> type) {
         try{ return om.readValue(s, type); }
         catch(Exception e) { throw new RuntimeException("JSON 역직렬화 실패", e);

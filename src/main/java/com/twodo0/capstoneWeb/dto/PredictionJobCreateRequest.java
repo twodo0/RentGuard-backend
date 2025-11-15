@@ -1,8 +1,0 @@
-package com.twodo0.capstoneWeb.dto;
-
-public record PredictionJobCreateRequest(
-        Long imageId,
-        Double yoloThreshold,
-        Double vitThreshold,
-        String model
-) {}

@@ -1,7 +1,14 @@
 # CarGuard-backend
 
 차량 대여/반납 과정에서 차량 손상을 자동으로 탐지하고 이력을 관리하는 Spring Boot 백엔드 애플리케이션이다.  
-차량 렌탈 세션 관리, 이미지 업로드, 손상 탐지, Grad-CAM 히트맵 생성(FastAPI 호출)까지를 담당한다.
+
+- 차량 렌탈 세션 관리
+- 이미지 업로드 (단일/4장 배치)
+- YOLO → ViT 기반 손상 탐지 (비동기)
+- Grad-CAM 히트맵 생성(FastAPI 연동, 단일 탐지용)
+- 렌트 시작/반납 시 손상 요약 및 추가 손상 계산
+
+을 담당한다.
 
 ---
 
@@ -10,48 +17,122 @@
 ### 1.1 이미지 업로드
 
 - `POST /api/images`
-- 프론트에서 업로드한 차량 이미지를 MinIO에 저장한다.
-- 원본 이미지의 접근 URL과 내부 식별자(`imageId`)를 반환한다.
+  - 단일 이미지 업로드
+  - MinIO에 저장 후 `imageId`, `rawUrl`, `width`, `height` 등을 반환
 
-### 1.2 손상 탐지 (비동기 추론)
+- `POST /api/images/batch`
+  - 4장 이미지 배치 업로드
+  - 요청 바디:
+    - `files`: 이미지 리스트 (`MultipartFile` 1~4장)
+    - `slots`: 각 이미지에 대응하는 촬영 위치 (`FRONT`, `REAR`, `LEFT`, `RIGHT`)
+  - 응답:
+    - `images: [{ slot, imageId }]`  
+      → 이후 렌트 시작/종료 배치 API 호출 시 사용
+
+### 1.2 손상 탐지 (단일 이미지 비동기 추론)
 
 - `POST /api/predictions/by-image/{imageId}`
-- 지정한 `imageId`에 대해 FastAPI YOLO→ViT 파이프라인에 비동기 추론을 요청한다.
-- 바로 `PredictionJob` 정보를 담은 DTO를 반환하고, 실제 추론은 백그라운드에서 수행한다.
+  - 지정한 `imageId`에 대해 FastAPI YOLO→ViT 파이프라인에 **비동기 추론** 요청
+  - 쿼리 파라미터:
+    - `yoloThreshold` (선택, 미지정 시 기본값 사용)
+  - 응답: `PredictionJobDto`
+    - `jobId`, `status` 등
 
 - `GET /api/predictions/jobs/{jobId}`
-- 특정 `jobId`에 대한 추론 상태 및 최종 결과를 조회한다.
--  
-  - 진행 중: `202 Accepted`
-  - 완료: `200 OK` + `PredictionDetail` 응답
+  - 특정 `jobId`에 대한 추론 상태 및 최종 결과 조회
+  - 응답:
+    - 진행 중: `202 Accepted` + `Retry-After` 헤더
+    - 실패: `422 Unprocessable Entity` + 에러 메시지
+    - 완료: `200 OK` + `PredictionDetailDto`
+      - `predictionId`
+      - `rawUrl`, `heatmapUrl`
+      - `detections` (bbox + class_probs)
+      - 원본 이미지 크기 (`width`, `height`)
 
-### 1.3 Grad-CAM 히트맵 저장
+> 이 단일 예측 API는 **우측 상단 메뉴에서 사용하는 “단일 손상 탐지 / 히트맵 데모 화면”**에서 활용된다.
 
-- FastAPI 서버가 추론 결과와 함께 Grad-CAM 히트맵 이미지를 생성한다.
-- MinIO에 `heatmaps` 버킷으로 저장하고, 서명된 URL을 통해 프론트에서 오버레이로 표시한다.
+### 1.3 Grad-CAM 히트맵 저장 (단일 탐지용)
 
-### 1.4 차량 렌탈 시작 / 종료
+- FastAPI 서버가 YOLO→ViT 추론과 함께 Grad-CAM 히트맵 PNG 생성
+- MinIO의 전용 heatmap 버킷에 저장
+- Spring에서 `heatmapBucket`, `heatmapKey`를 관리하고,
+  프론트에는 서명 URL(`heatmapUrl`)로 제공하여 이미지 위에 오버레이할 수 있게 한다.
 
-- `POST /api/rentals/start/upload`
-  - 쿼리 파라미터: `imageId`, `vehicleNo`, `yoloThreshold`, `vitThreshold`, `model`
-  - 해당 이미지로 손상 탐지를 수행한 뒤, 결과를 요약하여 `RentalSession`을 생성한다.
-  - 시작 시 손상 요약(`ConditionSummary`)을 JSON으로 세션에 저장한다.
-  - 응답은 `RentalStartRes`:
-    - `rentalSessionId`
-    - `predictionId`
-    - `start.total`, `start.byClass`
-    - `rentalStatus` (예: `IN_RENT`)
+### 1.4 차량 렌탈 시작 / 종료 (4장 배치 플로우 – 메인 기능)
 
-- `POST /api/rentals/end/upload`
-  - 쿼리 파라미터: `rentalId`, `imageId`, `vehicleNo`, `yoloThreshold`, `vitThreshold`, `model`
-  - 진행 중(`IN_RENT`)이던 세션을 로드하고, 반납 시 이미지를 기반으로 다시 손상 탐지를 수행한다.
-  - 시작/종료 손상 요약을 비교하여 `delta(손상 증감)`를 계산한다.
-  - 응답은 `RentalFinishRes`:
-    - `rentalSessionId`
-    - `predictionId`
-    - `finish.total`, `finish.byClass`
-    - `delta[DamageType]` (증가/감소 개수)
-    - `rentalStatus` (예: `RETURNED`)
+렌트 시작/반납 시 **앞/뒤/좌/우 4장**을 한 번에 업로드해 세션 단위로 손상을 관리한다.  
+(프론트에서는 먼저 `/api/images/batch`로 이미지를 업로드하여 `imageId`들을 받은 뒤,  
+해당 `imageId` 리스트를 들고 아래 배치 API를 호출한다.)
+
+#### 1.4.1 렌트 시작 배치
+
+- `POST /api/rentals/batch/start/upload`
+- 요청:
+  - `vehicleNo` (차량 번호)
+  - `yoloThreshold` (탐지 임계치)
+  - `images`: `[ { slot: FRONT|REAR|LEFT|RIGHT, imageId } ]`
+- 처리:
+  - 각 이미지에 대해 손상 탐지 수행
+  - 라벨별 손상 개수를 집계해 **렌트 시작 시 손상 요약 (`startSummary`)** 생성
+  - 세션 전체 손상 개수(`startTotal`) 계산
+  - `RentalSession` 생성 (`status = IN_RENT`)
+- 응답: `RentalStartBatchRes`
+  - `rentalId`
+  - `vehicleNo`
+  - `startSummary: Map<DamageType, Integer>`
+  - `startTotal: Integer`
+
+#### 1.4.2 렌트 종료(반납) 배치
+
+- `POST /api/rentals/batch/end/upload`
+- 요청:
+  - `rentalId` (기존 세션 ID)
+  - `vehicleNo` (검증용)
+  - `yoloThreshold`
+  - `images`: `[ { slot: FRONT|REAR|LEFT|RIGHT, imageId } ]`
+- 처리:
+  - 각 종료 이미지에 대해 손상 탐지 수행
+  - 라벨별 손상 개수를 집계해 **반납 시 손상 요약 (`finishSummary`)** 생성
+  - 렌트 시작 시점과 비교하여 라벨별 차이(`deltaSummary`) 계산
+  - `delta > 0`인 라벨만 **추가 손상**으로 집계해 `newDamageTotal` 계산
+  - 세션 상태를 `RETURNED`로 변경
+- 응답: `RentalFinishBatchRes`
+  - `rentalId`
+  - `vehicleNo`
+  - `finishSummary: Map<DamageType, Integer>`
+  - `deltaSummary: Map<DamageType, Integer>`
+  - `newDamageTotal: Integer`
+
+### 1.5 렌탈 세션 조회
+
+- `GET /api/rentals/recent`
+  - 최근 렌탈 세션 목록 조회 (페이지네이션)
+  - 각 Row:
+    - `rentalId`
+    - `vehicleNo`
+    - `status` (`IN_RENT`, `RETURNED`)
+    - `startedAt`, `finishedAt`
+    - `newDamageTotal` (반납 완료 시 추가 손상 개수)
+
+- `GET /api/rentals/{rentalId}?phase=START|END(optional)`
+  - 단일 렌탈 세션 상세 조회
+  - 응답: `RentalDetailDto`
+    - 메타:
+      - `rentalId`, `vehicleNo`, `status`, `startedAt`, `finishedAt`
+    - 세션 요약:
+      - `startSummary`, `finishSummary`, `deltaSummary`
+      - `startTotal`, `finishTotal`, `newDamageTotal`
+    - 이미지:
+      - `startImages: List<RentalImageDto>`
+      - `finishImages: List<RentalImageDto>`
+        - `IN_RENT` 상태인 경우 비어 있을 수 있음
+      - 각 `RentalImageDto`:
+        - `slot` (FRONT/REAR/LEFT/RIGHT)
+        - `rawUrl`
+        - `heatmapUrl` (필요 시)
+        - `summaryByImage: Map<DamageType, Integer>`
+        - `detections: List<DetectionDto>` (bbox + class_probs)  
+          → 프론트에서 bbox와 확률 툴팁 렌더링에 사용
 
 ---
 
@@ -59,24 +140,28 @@
 
 ### 2.1 전체 구성
 
-- Frontend: React + Vite (별도 레포지토리, `CarGuard-frontend`)
+- Frontend: React + Vite (별도 레포지토리)
 - Backend: Spring Boot (본 레포지토리)
 - Inference: FastAPI + YOLO + ViT (별도 레포지토리)
 - Storage: MinIO (S3 호환 스토리지)
 
 ### 2.2 주요 흐름
 
-1. 프론트에서 차량 이미지 업로드 → Spring → MinIO 저장 → `imageId` 반환
-2. 프론트에서 `imageId`로 비동기 추론 요청 → Spring → FastAPI 호출
-3. FastAPI에서 YOLO로 박스 검출 → ViT로 박스별 손상 분류 → Grad-CAM 생성
-4. FastAPI에서 MinIO에 preview, heatmap 업로드 → Spring에서 결과 저장
-5. 렌탈 시작 시:
-   - 시작 이미지로 추론 실행
-   - 손상 요약(`ConditionSummary`) 저장
-6. 렌탈 종료 시:
-   - 종료 이미지로 재추론
-   - 시작/종료 요약 비교 → `delta` 계산
-   - 반납 상태로 세션 종료
+1. 프론트에서 차량 이미지 업로드  
+   - `/api/images` 또는 `/api/images/batch` → Spring → MinIO 저장 → `imageId` 반환
+2. 필요 시 단일 이미지 비동기 예측  
+   - `/api/predictions/by-image/{imageId}` → FastAPI → YOLO→ViT 추론 + Grad-CAM 생성  
+   - 결과/히트맵을 MinIO에 저장하고 `/api/predictions/jobs/{jobId}`로 조회
+3. 렌트 시작:
+   - 4장 이미지 업로드 후 `/api/rentals/batch/start/upload` 호출
+   - 시작 시 손상 요약(`startSummary`, `startTotal`) 저장
+4. 렌트 종료:
+   - 동일 기준 4장 업로드 후 `/api/rentals/batch/end/upload` 호출
+   - 반납 시 손상 요약(`finishSummary`, `finishTotal`) 및 `deltaSummary`, `newDamageTotal` 계산
+   - 세션 상태를 `RETURNED`로 변경
+5. 조회:
+   - `/api/rentals/recent`로 최근 세션 목록 조회
+   - `/api/rentals/{rentalId}`에서 세션 요약 + 이미지별 bbox/확률 정보 조회
 
 ---
 
@@ -86,8 +171,6 @@
 - Spring Boot
   - Spring Web
   - Spring Data JPA
-  - Validation
-- Gradle
 - MinIO (S3 호환 객체 스토리지)
 - FastAPI (외부 추론 서버, Python)
 - Database
@@ -95,102 +178,47 @@
 
 ---
 
-## 4. 도메인 모델 개요
+## 4. 도메인 모델 개요 (요약)
 
 ### 4.1 Prediction
 
-- 단일 이미지에 대한 손상 탐지 결과를 나타낸다.
-- 주요 필드 예:
+- 단일 이미지에 대한 손상 탐지 결과
+- 주요 필드:
   - `id`
-  - `imageId`
-  - `rawUrl` (MinIO 원본 이미지 경로/URL)
-  - `heatMapUrl`
-  - `detections` (박스, 클래스 확률 등)
+  - `image` (버킷/키, width/height)
+  - `heatmapBucket`, `heatmapKey`
+  - `detections` (bbox, classProbs 등)
 
 ### 4.2 PredictionJob
 
-- 비동기 추론 작업을 표현한다.
-- 주요 필드 예:
+- 비동기 추론 작업
+- 주요 필드:
   - `id`
-  - `status` (PENDING, RUNNING, DONE, FAILED 등)
+  - `status` (QUEUED, RUNNING, SUCCEEDED, FAILED 등)
   - `prediction` 연관관계
   - 오류 메시지 등
 
 ### 4.3 RentalSession
 
-- 차량 한 대에 대한 렌탈 세션을 나타낸다.
-- 주요 필드 예:
-  - `id` (rentalSessionId)
-  - `vehicleNo` (차량 번호)
-  - `status` (`RentalStatus`: `IN_RENT`, `RETURNED` 등)
-  - `startPrediction`, `endPrediction`
-  - `startSummaryJson` (시작 시 `ConditionSummary` JSON)
-  - `deltaJson` (손상 증감 JSON)
+- 차량 한 대에 대한 렌탈 세션
+- 주요 필드:
+  - `id` (`rentalId`)
+  - `vehicleNo`
+  - `status` (`IN_RENT`, `RETURNED`)
+  - `startSummaryJson`, `endSummaryJson`, `deltaJson`
+  - `images` (각 phase/slot별 `RentalImage` 리스트)
 
-### 4.4 DamageType / RentalStatus
+### 4.4 RentalImage
 
-- `DamageType`
-  - `SCRATCH`, `DENT`, `BREAKAGE`, `SEPARATION`, …  
-  (프로젝트 정의에 따라 변할 수 있다)
-- `RentalStatus`
-  - `IN_RENT`, `RETURNED` 등
+- 렌트 시작/반납 시 촬영한 단일 이미지
+- 주요 필드:
+  - `phase` (`START`, `END`)
+  - `slot` (`FRONT`, `REAR`, `LEFT`, `RIGHT`)
+  - `prediction` 연관관계
 
----
+### 4.5 DamageType / RentalStatus / Phase / ImageSlot
 
-## 5. 주요 API 요약
-
-자세한 스키마는 추후 Swagger/OpenAPI 문서로 정리한다는 가정으로, 여기서는 엔드포인트 개요만 적는다.
-
-### 5.1 이미지 업로드
-
-- `POST /api/images`
-- `multipart/form-data`로 이미지 파일을 업로드한다.
-- 응답: `imageId`, `rawUrl` 등
-
-### 5.2 예측 (비동기)
-
-- `POST /api/predictions/by-image/{imageId}`
-  - 쿼리 파라미터:
-    - `yoloThreshold` (선택, 기본값 존재)
-    - `vitThreshold` (선택, 기본값 존재)
-    - `model` (선택, 예: `YOLO - ViT`)
-  - 응답: `PredictionJobDto` (jobId, 상태 등)
-
-- `GET /api/predictions/jobs/{jobId}`
-  - 진행 중인 경우: HTTP 202
-  - 완료된 경우: HTTP 200 + `PredictionDetail`
-
-### 5.3 렌탈 시작
-
-- `POST /api/rentals/start/upload`
-  - 쿼리 파라미터:
-    - `imageId` (필수)
-    - `vehicleNo` (필수)
-    - `yoloThreshold` (선택, 기본값 0.2 등)
-    - `vitThreshold` (선택, 기본값 0.65 등)
-    - `model` (선택, 기본값 `YOLO - ViT`)
-  - 응답: `RentalStartRes`
-    - `rentalSessionId`
-    - `vehicleNo`
-    - `predictionId`
-    - `start.total`, `start.byClass`
-    - `rentalStatus`
-
-### 5.4 렌탈 종료
-
-- `POST /api/rentals/end/upload`
-  - 쿼리 파라미터:
-    - `rentalId` (필수)
-    - `imageId` (필수)
-    - `vehicleNo` (필수, 검증용)
-    - `yoloThreshold` (선택)
-    - `vitThreshold` (선택)
-    - `model` (선택)
-  - 응답: `RentalFinishRes`
-    - `rentalSessionId`
-    - `vehicleNo`
-    - `predictionId`
-    - `finish.total`, `finish.byClass`
-    - `delta[DamageType]`
-    - `rentalStatus`
-
+- `DamageType` : 손상 라벨 (예: `BREAKAGE`, `CRUSHED`, `SCRATCHED`, `SEPARATED`, `NORMAL` 등)
+- `RentalStatus` : 세션 상태 (`IN_RENT`, `RETURNED`)
+- `Phase` : 렌트 시작/종료 구분 (`START`, `END`)
+- `ImageSlot` : 촬영 위치 (`FRONT`, `REAR`, `LEFT`, `RIGHT`)

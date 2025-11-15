@@ -20,7 +20,7 @@ public class RentalController {
     @PostMapping("/start/upload")
     public RentalStartRes startRental(
             @RequestParam Long imageId,
-            @RequestParam String vehicleNo,
+            @RequestParam(required = true) String vehicleNo,
             @RequestParam(defaultValue = "0.2") Double yoloThreshold,
             @RequestParam(defaultValue = "0.65") Double vitThreshold,
             @RequestParam(defaultValue = "YOLO - ViT") String model
@@ -32,12 +32,12 @@ public class RentalController {
 
     @PostMapping("/end/upload")
     public RentalFinishRes finishRental(
-            @RequestParam Long imageId,
             @RequestParam Long rentalId,
+            @RequestParam Long imageId,
+            @RequestParam(required = true) String vehicleNo, // 필수
             @RequestParam(defaultValue = "0.2") Double yoloThreshold,
             @RequestParam(defaultValue = "0.65") Double vitThreshold,
-            @RequestParam(defaultValue = "YOLO - ViT") String model, // 임계값, 모델 -> 안 보내면 start 때 사용한 거 사용
-            @RequestParam(required = false) String vehicleNo // 검증용
+            @RequestParam(defaultValue = "YOLO - ViT") String model // 임계값, 모델 -> 안 보내면 start 때 사용한 거 사용
     ){
         RentalFinishReq finishReq = new RentalFinishReq(imageId, rentalId, yoloThreshold, vitThreshold, model, vehicleNo);
         return rentalService.finishRental(finishReq);
